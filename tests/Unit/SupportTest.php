@@ -109,6 +109,36 @@ final class SupportTest extends TestCase
         }
     }
 
+    public function testOffByDefaultWhenAppEnvIsProduction(): void
+    {
+        Gaze::reset();
+        $restore = ['APP_ENV' => getenv('APP_ENV'), 'GAZE_ENABLED' => getenv('GAZE_ENABLED')];
+        try {
+            foreach (['production' => false, 'prod' => false, 'PRODUCTION' => false, 'local' => true, 'staging' => true] as $env => $on) {
+                putenv("APP_ENV=$env");
+                Config::reset();
+                $this->assertSame($on, Config::get('enabled'), "APP_ENV=$env");
+            }
+            putenv('APP_ENV=production');
+            putenv('GAZE_ENABLED=true');
+            Config::reset();
+            $this->assertTrue(Config::get('enabled'), 'GAZE_ENABLED wins over APP_ENV');
+            putenv('GAZE_ENABLED');
+            Gaze::configure(['enabled' => true]);
+            $this->assertTrue(Config::get('enabled'), 'configure() wins over APP_ENV');
+            Gaze::reset();
+            $this->assertFalse(Gaze::make()->enabled(), 'gaze() is inert in production');
+            putenv('APP_ENV');
+            Config::reset();
+            $this->assertTrue(Config::get('enabled'), 'no APP_ENV: on');
+        } finally {
+            foreach ($restore as $k => $v) {
+                putenv($v === false ? $k : "$k=$v");
+            }
+            Gaze::reset();
+        }
+    }
+
     public function testBooleanParsing(): void
     {
         foreach (['false', 'FALSE', '0', 'off', 'no', '(false)', ''] as $v) {
@@ -163,7 +193,7 @@ final class SupportTest extends TestCase
             $registered = \TheWonderJoy\Gaze\Gaze::registerRayHelper();
             echo json_encode([$registered, get_class(ray('x')), \TheWonderJoy\Gaze\Gaze::registerRayHelper()]);
             PHP);
-        $this->assertSame('[true,"TheWonderJoy\\\\Gaze\\\\Gaze",false]', $r['out'], $r['err']);
+        $this->assertSame('[true,"TheWonderJoy\\\\Gaze\\\\Noop",false]', $r['out'], $r['err']);
     }
 
     public function testSchemaCopyMatchesTheProtocolFolder(): void

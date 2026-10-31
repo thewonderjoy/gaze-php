@@ -269,6 +269,40 @@ final class TransportTest extends TestCase
         $this->assertSame([], $this->requests());
     }
 
+    public function testOffLoadsOnlyTheNoopAndNeverExits(): void
+    {
+        $code = <<<'PHP'
+            use TheWonderJoy\Gaze\Gaze;
+            $ran = 0;
+            gaze('x', ['y' => 1])->red()->label('l')->table(['a' => 1])->count();
+            gaze()->enable()->send('still off after enable()');
+            gaze()->die();
+            gaze_dd('gaze_dd returns');
+            gaze()->pause();
+            gaze()->flush();
+            $group = gaze()->group('g', fn ($g) => 42);
+            gaze()->measure(function () use (&$ran) { $ran++; });
+            $classes = array_values(array_filter(get_declared_classes(), static fn ($c) => str_starts_with($c, 'TheWonderJoy\\')));
+            echo json_encode(['classes' => $classes, 'class' => get_class(gaze()), 'group' => $group, 'ran' => $ran, 'pass' => gaze()->pass(7), 'enabled' => gaze()->enabled()]);
+            PHP;
+        $quiet = ['classes' => ['TheWonderJoy\Gaze\Config', 'TheWonderJoy\Gaze\Noop'], 'class' => 'TheWonderJoy\Gaze\Noop', 'group' => 42, 'ran' => 1, 'pass' => 7, 'enabled' => false];
+        foreach ([['GAZE_ENABLED' => 'false'], ['APP_ENV' => 'production'], ['APP_ENV' => 'prod']] as $env) {
+            $r = $this->runPhp($code, $env + ['GAZE_HOST' => '127.0.0.1', 'GAZE_PORT' => (string) self::PORT]);
+            $this->assertSame(0, $r['exit'], $r['out'] . $r['err']);
+            $this->assertSame($quiet, json_decode($r['out'], true), $r['err']);
+        }
+        $this->assertSame([], $this->requests(), 'not even a handshake');
+
+        // configure() switches it off for good; disable() only pauses, and die() returns while paused.
+        Gaze::configure(['enabled' => false]);
+        gaze()->enable();
+        $this->assertInstanceOf(\TheWonderJoy\Gaze\Noop::class, gaze());
+        Gaze::configure(['enabled' => true]);
+        $paused = gaze()->disable();
+        $this->assertSame($paused, $paused->die(), 'die() returns while paused');
+        $this->assertTrue(gaze()->enable()->enabled(), 'enable() resumes after disable()');
+    }
+
     public function testEnvironmentSelectsHostAndPortWithRayFallback(): void
     {
         $child = $this->runPhp('$c = \TheWonderJoy\Gaze\Gaze::configure(["state_dir" => ' . var_export($this->stateDir, true) . ']); gaze("via RAY_HOST/RAY_PORT"); \TheWonderJoy\Gaze\Gaze::client()->flush();', [

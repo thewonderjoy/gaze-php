@@ -170,7 +170,7 @@ class Gaze
     /** @return array<string, mixed>|null */
     public static function traceContext(): ?array
     {
-        return Client::current()?->traceContext();
+        return self::on() ? Client::current()?->traceContext() : null;
     }
 
     /**
@@ -181,6 +181,9 @@ class Gaze
      */
     public static function setTraceContext(?array $trace): void
     {
+        if (!self::on()) {
+            return;
+        }
         if ($trace !== null) {
             if (!preg_match('/^[0-9a-f]{32}$/', (string) ($trace['id'] ?? ''))) {
                 $trace['id'] = Uuid::traceId();
@@ -202,28 +205,40 @@ class Gaze
         if ($parent !== null && preg_match('/^[0-9a-f]{16}$|^[0-9a-f]{32}$/', $parent)) {
             $trace['parent'] = $parent;
         }
-        Client::instance()->setTrace($trace);
+        if (self::on()) {
+            Client::instance()->setTrace($trace);
+        }
 
         return $trace['id'];
     }
 
-    /** Continues a W3C traceparent (00-<trace-id>-<span-id>-<flags>) from an incoming request. */
+    /**
+     * Starts the trace of a request that came with a W3C traceparent (00-<trace-id>-<span-id>-<flags>):
+     * a trace of its own, whose parent is the caller's span, so the app links it to the call that
+     * caused it. Returns the new trace id, or null when the header is not a traceparent.
+     */
     public static function continueTrace(string $traceparent, string $name, string $kind = 'http'): ?string
     {
         if (!preg_match('/^[0-9a-f]{2}-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/', strtolower(trim($traceparent)), $m)) {
             return null;
         }
-        Client::instance()->setTrace(['id' => $m[1], 'parent' => $m[2], 'kind' => self::traceKind($kind), 'name' => $name, 'started_at' => round(microtime(true) * 1000, 3)]);
+        $id = Uuid::traceId();
+        if (self::on()) {
+            Client::instance()->setTrace(['id' => $id, 'parent' => $m[2], 'kind' => self::traceKind($kind), 'name' => $name, 'started_at' => round(microtime(true) * 1000, 3)]);
+        }
 
-        return $m[1];
+        return $id;
     }
 
-    /** W3C traceparent header value for outgoing calls (null without a trace). */
+    /**
+     * W3C traceparent header value for outgoing calls (null without a trace). Its span id is the
+     * first half of this trace's id, which the app resolves back to this trace.
+     */
     public static function traceparent(): ?string
     {
-        $trace = Client::current()?->traceContext();
+        $trace = self::traceContext();
 
-        return $trace === null ? null : '00-' . $trace['id'] . '-' . Uuid::spanId() . '-01';
+        return $trace === null ? null : '00-' . $trace['id'] . '-' . substr($trace['id'], 0, 16) . '-01';
     }
 
     /**
@@ -983,16 +998,17 @@ class Gaze
         return $this;
     }
 
+    /** Resumes sending after disable(). Gaze switched off by configure() or the environment stays off. */
     public function enable(): static
     {
-        Config::set(['enabled' => true]);
+        Config::pause(false);
 
         return $this;
     }
 
     public function disable(): static
     {
-        Config::set(['enabled' => false]);
+        Config::pause(true);
 
         return $this;
     }
@@ -1012,7 +1028,9 @@ class Gaze
     /** Synchronously sends everything queued (waits for the app's answer, flush_timeout_ms at most). */
     public function flush(): static
     {
-        Client::current()?->flush();
+        if (self::on()) {
+            Client::current()?->flush();
+        }
 
         return $this;
     }
@@ -1052,9 +1070,12 @@ class Gaze
         return $this;
     }
 
-    /** Flushes synchronously, then exits. */
-    public function die(int|string $status = ''): never
+    /** Flushes synchronously, then exits. Off, it does nothing and returns. */
+    public function die(int|string $status = ''): static
     {
+        if (!self::on()) {
+            return $this;
+        }
         Client::current()?->flush();
         exit($status);
     }
@@ -1214,6 +1235,14 @@ class Gaze
         }
 
         return $body;
+    }
+
+    /** On, and not paused by disable(). */
+    private static function on(): bool
+    {
+        Config::all();
+
+        return Config::$enabled;
     }
 
     private static function fingerprint(): string

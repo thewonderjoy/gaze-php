@@ -214,19 +214,24 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         $autoload = var_export(dirname(__DIR__) . '/vendor/autoload.php', true);
         file_put_contents($file, "<?php\nrequire $autoload;\n" . $code);
         $fullEnv = getenv();
-        foreach (['GAZE_ENABLED', 'GAZE_HOST', 'GAZE_PORT', 'RAY_HOST', 'RAY_PORT', 'GAZE_TOKEN'] as $k) {
+        foreach (['GAZE_ENABLED', 'GAZE_HOST', 'GAZE_PORT', 'RAY_HOST', 'RAY_PORT', 'GAZE_TOKEN', 'APP_ENV'] as $k) {
             unset($fullEnv[$k]);
         }
-        $proc = proc_open([PHP_BINARY, $file], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, $env + $fullEnv);
+        // Output goes to files, not pipes. Reading one pipe to the end while the child fills the other
+        // deadlocks on Windows, where a pipe holds about 4 KB.
+        $outFile = $file . '.out';
+        $errFile = $file . '.err';
+        $proc = proc_open([PHP_BINARY, $file], [1 => ['file', $outFile, 'w'], 2 => ['file', $errFile, 'w']], $pipes, null, $env + $fullEnv);
         $start = microtime(true);
-        $out = stream_get_contents($pipes[1]);
-        $err = stream_get_contents($pipes[2]);
-        fclose($pipes[1]);
-        fclose($pipes[2]);
         $exit = proc_close($proc);
+        $ms = (microtime(true) - $start) * 1000;
+        $out = (string) @file_get_contents($outFile);
+        $err = (string) @file_get_contents($errFile);
         @unlink($file);
+        @unlink($outFile);
+        @unlink($errFile);
 
-        return ['exit' => $exit, 'out' => (string) $out, 'err' => (string) $err, 'ms' => (microtime(true) - $start) * 1000];
+        return ['exit' => $exit, 'out' => $out, 'err' => $err, 'ms' => $ms];
     }
 
     /** PHP literal that configures Gaze in a child process like setUp() does here. */

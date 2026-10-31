@@ -30,9 +30,13 @@ Content details: `json` / `toJson` are merged (JSON strings are decoded, other v
 - **Host discovery** (no host configured): `127.0.0.1` → `host.docker.internal` (when `/.dockerenv` exists or `LARAVEL_SAIL` is set) → the default gateway from `/proc/net/route` (WSL2 NAT, containers). Candidates are probed in parallel (`GET /v1/hello`, 150 ms connect timeout) and the winner is cached for 60 s. `127.0.0.1` rather than `localhost`: on Windows, `localhost` tries `::1` first and a closed IPv6 port times out instead of refusing.
 - The token (`GAZE_TOKEN`) is sent as `Authorization: Bearer` to non-loopback hosts only. A `ray.php` file is never read.
 
+Precedence per key: `Gaze::configure()`, then the environment, then the default. `enabled` reads `GAZE_ENABLED`; when it is unset, the default is off if `APP_ENV` is `production` or `prod` (any case), and on otherwise. gaze-laravel always passes `enabled` explicitly, so Laravel's own rule (`! app()->isProduction()`) decides there.
+
 All config keys: `host`, `port`, `token`, `enabled`, `project`, `limits`, `connect_timeout_ms` (100), `timeout_ms` (2000), `linger_ms` (2), `drain_ms` (250), `flush_timeout_ms` (2000), `down_ttl` (30), `hello_ttl` (60), `host_ttl` (60), `probe_timeout_ms` (150), `state_dir` (temp dir), `origin_frames` (3), `discover`, `logger` (callable, or `false`), and `client_name`, `client_version`, `framework`, `framework_version` for framework packages.
 
-When disabled, `gaze()` returns one shared inert instance before any value is touched: no cloning, no closures called, no network.
+Off by `configure()` or the environment (`Config::off()`), `gaze()` and `ray()` return `Noop`, which depends on nothing: a process loads `Config` and `Noop` and no other class of the package. Every call returns the Noop and does nothing; `gaze_dd()`, `rd()` and `die()` return instead of exiting. It still runs the caller's own code: `pass()`, `group($name, $fn)`, `measure($fn)`, and the methods a framework declares with `Noop::runs()` (gaze-laravel's `showQueries($fn)`, `countQueries($fn)`...).
+
+Paused with `disable()`, `gaze()` returns one shared inert `Gaze` instance before any value is touched: no cloning, no closures called, no network, `die()` returns, and `enable()` resumes.
 
 ## Values
 

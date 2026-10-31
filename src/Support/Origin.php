@@ -44,7 +44,8 @@ final class Origin
 
     public static function isVendor(string $file): bool
     {
-        return str_contains($file, DIRECTORY_SEPARATOR . 'vendor' . DIRECTORY_SEPARATOR) || str_contains($file, '/vendor/');
+        // Both separators on every OS, so the answer does not depend on where PHP runs.
+        return str_contains($file, '/vendor/') || str_contains($file, '\\vendor\\');
     }
 
     /**

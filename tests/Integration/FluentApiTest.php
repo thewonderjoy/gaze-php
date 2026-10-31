@@ -388,7 +388,7 @@ final class FluentApiTest extends TestCase
         Gaze::client()->flush();
 
         $this->assertSame(7, $result);
-        $this->assertMatchesRegularExpression('/^00-' . $traceId . '-[0-9a-f]{16}-01$/', (string) $traceparent);
+        $this->assertSame('00-' . $traceId . '-' . substr($traceId, 0, 16) . '-01', $traceparent);
         $entries = [];
         foreach ($this->batches() as $batch) {
             foreach ($batch['entries'] as $e) {
@@ -413,7 +413,11 @@ final class FluentApiTest extends TestCase
         $this->assertNull($byText['no trace']['trace']);
         $this->assertBatchesValid();
 
-        $this->assertSame('0af7651916cd43dd8448eb211c80319c', Gaze::continueTrace('00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01', 'GET /'));
+        // A trace of its own: requests that share one distributed trace id must not merge.
+        $own = Gaze::continueTrace('00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01', 'GET /');
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{32}$/', (string) $own);
+        $this->assertNotSame('0af7651916cd43dd8448eb211c80319c', $own);
+        $this->assertSame($own, Gaze::traceContext()['id']);
         $this->assertSame('b7ad6b7169203331', Gaze::traceContext()['parent']);
         $this->assertNull(Gaze::continueTrace('garbage', 'x'));
     }
