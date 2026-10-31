@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/protocol/v1/batch.schema.json",
+  "title": "Batch",
+  "description": "Native ingest protocol v1 (DRAFT, protocol/RFC-0001). Body of POST /v1/batch. Brand-neutral on purpose: no product name appears in any wire identifier.",
+  "type": "object",
+  "required": ["v", "client", "session", "entries"],
+  "properties": {
+    "v": { "const": 1, "description": "Protocol major version. Additive changes never bump it." },
+    "client": { "$ref": "#/$defs/Client" },
+    "session": { "type": "string", "minLength": 8, "maxLength": 64, "description": "One id per OS process (PHP/Node) or page load (browser). Entries are ordered by (session, seq)." },
+    "trace": { "$ref": "#/$defs/Trace", "description": "Default unit-of-work for every entry in this batch; an entry may override it." },
+    "entries": { "type": "array", "minItems": 1, "maxItems": 5000, "items": { "$ref": "#/$defs/Entry" } }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "Client": {
+      "type": "object",
+      "required": ["name", "version", "runtime"],
+      "properties": {
+        "name": { "type": "string", "description": "Package name, e.g. vendor/php or @scope/node" },
+        "version": { "type": "string" },
+        "runtime": { "enum": ["php", "node", "bun", "deno", "browser", "worker", "edge", "other"] },
+        "runtime_version": { "type": "string" },
+        "framework": { "type": "string", "description": "laravel, symfony, vue, react, ..." },
+        "framework_version": { "type": "string" },
+        "host": { "type": "string", "description": "Machine/container hostname" },
+        "pid": { "type": "integer" },
+        "project": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "root": { "type": "string", "description": "Absolute project root as the client sees it (container/WSL path); used for path mapping and dev-server URL -> file mapping" },
+            "dev_server": { "type": "string", "description": "Vite/dev server origin, browser and Vite plugin only" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "Trace": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[0-9a-f]{32}$", "description": "W3C trace-id (16 bytes hex) so it can ride on a standard traceparent header" },
+        "parent": { "type": "string", "pattern": "^[0-9a-f]{16}$|^[0-9a-f]{32}$", "description": "Parent span id, or parent trace id for cross-unit links (job dispatched by request)" },
+        "kind": { "enum": ["http", "job", "command", "test", "schedule", "browser", "livewire", "inertia", "other"] },
+        "name": { "type": "string" },
+        "started_at": { "type": "number", "description": "epoch ms" },
+        "ended": { "type": "boolean", "description": "true on the entry that closes the unit (summary row)" }
+      },
+      "additionalProperties": true
+    },
+    "Color": { "enum": ["green", "orange", "red", "purple", "blue", "gray"] },
+    "Entry": {
+      "type": "object",
+      "required": ["op", "id", "seq"],
+      "properties": {
+        "op": { "enum": ["add", "update", "patch", "append", "remove"], "description": "add: new entry (an existing id is treated as update). update: replace body, keep modifiers not given (Ray same-uuid semantics). patch: modifiers only, no body. append: add body as a new iteration of entry id (Ray ai_custom_html iterationOf semantics). remove: delete." },
+        "id": { "type": "string", "minLength": 8, "maxLength": 64, "description": "Client-generated entry id (UUID v4/v7). Stable across update/patch/append/remove." },
+        "seq": { "type": "integer", "minimum": 0, "description": "Per-session monotonic counter" },
+        "ts": { "type": "number", "description": "Client clock, epoch ms (fractional allowed)" },
+        "kind": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,63}$", "description": "Known kinds have a body schema below; unknown kinds are rendered as a generic JSON tree of body." },
+        "body": { "type": "object" },
+        "label": { "type": "string", "maxLength": 200 },
+        "color": { "$ref": "#/$defs/Color" },
+        "size": { "enum": ["sm", "md", "lg"] },
+        "hidden": { "type": "boolean" },
+        "expand": { "type": "object", "properties": { "level": { "type": "integer", "minimum": 0 }, "paths": { "type": "array", "items": { "type": "string" } } }, "additionalProperties": false },
+        "origin": { "$ref": "#/$defs/Origin" },
+        "trace": { "$ref": "#/$defs/Trace" },
+        "tags": { "type": "object", "additionalProperties": { "type": ["string", "number", "boolean"] } }
+      },
+      "allOf": [
+        { "if": { "properties": { "op": { "enum": ["add", "update", "append"] } } }, "then": { "required": ["kind", "body"] } },
+        { "if": { "properties": { "op": { "const": "patch" } } }, "then": { "not": { "required": ["body"] } } },
+        { "if": { "properties": { "kind": { "const": "log" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/LogBody" } } } },
+        { "if": { "properties": { "kind": { "const": "text" } }, "required": ["kind"] }, "then": { "properties": { "body": { "type": "object", "required": ["text"], "properties": { "text": { "type": "string" } } } } } },
+        { "if": { "properties": { "kind": { "const": "html" } }, "required": ["kind"] }, "then": { "properties": { "body": { "type": "object", "required": ["html"], "properties": { "html": { "type": "string" } } } } } },
+        { "if": { "properties": { "kind": { "const": "markdown" } }, "required": ["kind"] }, "then": { "properties": { "body": { "type": "object", "required": ["markdown"], "properties": { "markdown": { "type": "string" } } } } } },
+        { "if": { "properties": { "kind": { "const": "mermaid" } }, "required": ["kind"] }, "then": { "properties": { "body": { "type": "object", "required": ["source"], "properties": { "source": { "type": "string" } } } } } },
+        { "if": { "properties": { "kind": { "const": "table" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/TableBody" } } } },
+        { "if": { "properties": { "kind": { "const": "exception" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/ExceptionBody" } } } },
+        { "if": { "properties": { "kind": { "const": "query" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/QueryBody" } } } },
+        { "if": { "properties": { "kind": { "const": "trace" } }, "required": ["kind"] }, "then": { "properties": { "body": { "type": "object", "required": ["frames"], "properties": { "frames": { "type": "array", "items": { "$ref": "#/$defs/Frame" } } } } } } },
+        { "if": { "properties": { "kind": { "const": "measure" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/MeasureBody" } } } },
+        { "if": { "properties": { "kind": { "const": "lock" } }, "required": ["kind"] }, "then": { "properties": { "body": { "type": "object", "properties": { "name": { "type": "string" } } } } } },
+        { "if": { "properties": { "kind": { "const": "cmd" } }, "required": ["kind"] }, "then": { "properties": { "body": { "$ref": "#/$defs/CommandBody" } } } }
+      ],
+      "additionalProperties": true
+    },
+    "Origin": {
+      "type": "object",
+      "properties": {
+        "file": { "type": "string", "description": "Path as seen by the client (or a URL for browser code before mapping)" },
+        "line": { "type": "integer", "minimum": 1 },
+        "col": { "type": "integer", "minimum": 1 },
+        "function": { "type": "string" },
+        "class": { "type": "string" },
+        "frames": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/Frame" }, "description": "Optional 'called from' chain (top N app frames)" }
+      },
+      "additionalProperties": true
+    },
+    "Frame": {
+      "type": "object",
+      "required": ["file", "line"],
+      "properties": {
+        "file": { "type": "string" },
+        "line": { "type": "integer", "minimum": 0 },
+        "col": { "type": "integer" },
+        "function": { "type": "string" },
+        "class": { "type": "string" },
+        "vendor": { "type": "boolean" },
+        "snippet": { "type": "array", "items": { "type": "object", "required": ["line", "text"], "properties": { "line": { "type": "integer" }, "text": { "type": "string" } } } }
+      },
+      "additionalProperties": true
+    },
+    "LogBody": { "type": "object", "required": ["values"], "properties": { "values": { "type": "array", "items": { "$ref": "#/$defs/Value" } } } },
+    "TableBody": {
+      "type": "object",
+      "oneOf": [
+        { "required": ["entries"], "properties": { "entries": { "type": "array", "items": { "type": "array", "prefixItems": [{ "type": "string" }, { "$ref": "#/$defs/Value" }], "minItems": 2, "maxItems": 2 } } } },
+        { "required": ["rows"], "properties": { "columns": { "type": "array", "items": { "type": "string" } }, "rows": { "type": "array", "items": { "type": "array", "items": { "$ref": "#/$defs/Value" } } } } }
+      ]
+    },
+    "ExceptionBody": {
+      "type": "object",
+      "required": ["class", "message", "frames"],
+      "properties": {
+        "class": { "type": "string" }, "message": { "type": "string" }, "code": { "type": ["string", "integer"] },
+        "frames": { "type": "array", "items": { "$ref": "#/$defs/Frame" } },
+        "previous": { "$ref": "#/$defs/ExceptionBody" },
+        "context": { "$ref": "#/$defs/Value" }
+      }
+    },
+    "QueryBody": {
+      "type": "object",
+      "required": ["sql"],
+      "properties": {
+        "sql": { "type": "string" }, "bindings": { "type": "array", "items": { "$ref": "#/$defs/Value" } },
+        "connection": { "type": "string" }, "driver": { "type": "string" }, "time_ms": { "type": "number" },
+        "fingerprint": { "type": "string", "description": "Normalized SQL hash for N+1 / duplicate grouping" }
+      }
+    },
+    "MeasureBody": {
+      "type": "object",
+      "required": ["name"],
+      "properties": { "name": { "type": "string" }, "total_ms": { "type": "number" }, "since_last_ms": { "type": "number" }, "mem_peak": { "type": "integer" }, "mem_delta": { "type": "integer" }, "is_new": { "type": "boolean" } }
+    },
+    "CommandBody": {
+      "type": "object",
+      "required": ["cmd"],
+      "properties": {
+        "cmd": { "enum": ["new_screen", "clear", "screen_color", "show_app", "hide_app", "notify", "confetti"] },
+        "name": { "type": "string" }, "color": { "$ref": "#/$defs/Color" }, "text": { "type": "string" }
+      },
+      "description": "Global commands. Ordered with entries but never stored as entries."
+    },
+    "Value": {
+      "description": "Semantic value tree (VNode). Produced from VarCloner Data (PHP) or a bounded JS walker. Truncation is explicit via cut; identity via id/ref.",
+      "type": "object",
+      "required": ["k"],
+      "properties": { "k": { "type": "string" } },
+      "oneOf": [
+        { "properties": { "k": { "enum": ["null", "undef"] } }, "required": ["k"] },
+        { "properties": { "k": { "const": "bool" }, "v": { "type": "boolean" } }, "required": ["k", "v"] },
+        { "properties": { "k": { "const": "int" }, "v": { "type": ["integer", "string"], "description": "string when |v| > 2^53-1 (PHP int64, JS bigint)" } }, "required": ["k", "v"] },
+        { "properties": { "k": { "const": "float" }, "v": { "anyOf": [{ "type": "number" }, { "enum": ["NaN", "INF", "-INF", "-0"] }] } }, "required": ["k", "v"] },
+        { "properties": { "k": { "const": "str" }, "v": { "type": "string" }, "enc": { "enum": ["b64"] }, "cut": { "type": "integer", "minimum": 1, "description": "characters omitted" }, "len": { "type": "integer" } }, "required": ["k", "v"] },
+        { "properties": { "k": { "const": "const" }, "v": { "type": "string" } }, "required": ["k", "v"], "description": "Opaque caster label (PHP) or symbol (JS)" },
+        { "properties": { "k": { "const": "list" }, "cls": { "type": "string", "description": "JS Set/typed array/Collection class name" }, "count": { "type": ["integer", "null"] }, "items": { "type": "array", "items": { "$ref": "#/$defs/Value" } }, "cut": { "type": "integer" }, "id": { "type": "integer" } }, "required": ["k"] },
+        { "properties": { "k": { "const": "map" }, "cls": { "type": "string" }, "count": { "type": ["integer", "null"] }, "entries": { "type": "array", "items": { "type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{ "anyOf": [{ "type": "string" }, { "type": "integer" }, { "$ref": "#/$defs/Value" }] }, { "$ref": "#/$defs/Value" }] } }, "cut": { "type": "integer" }, "id": { "type": "integer" } }, "required": ["k"] },
+        { "properties": { "k": { "const": "obj" }, "cls": { "type": "string" }, "id": { "type": "integer" }, "props": { "type": "array", "items": { "$ref": "#/$defs/Prop" } }, "cut": { "type": "integer" } }, "required": ["k", "cls"] },
+        { "properties": { "k": { "const": "ref" }, "to": { "type": "integer" }, "cls": { "type": ["string", "null"] } }, "required": ["k", "to"] },
+        { "properties": { "k": { "const": "res" }, "rt": { "type": "string" }, "props": { "type": "array", "items": { "$ref": "#/$defs/Prop" } } }, "required": ["k", "rt"] },
+        { "properties": { "k": { "const": "fn" }, "name": { "type": "string" }, "async": { "type": "boolean" }, "gen": { "type": "boolean" } }, "required": ["k"] },
+        { "properties": { "k": { "const": "date" }, "iso": { "type": "string" }, "tz": { "type": "string" } }, "required": ["k", "iso"] },
+        { "properties": { "k": { "const": "err" }, "name": { "type": "string" }, "message": { "type": "string" }, "stack": { "type": "string" }, "cause": { "$ref": "#/$defs/Value" } }, "required": ["k", "name", "message"] },
+        { "properties": { "k": { "const": "dom" }, "tag": { "type": "string" }, "attrs": { "type": "object", "additionalProperties": { "type": "string" } }, "html": { "type": "string", "description": "truncated outerHTML, rendered as text" } }, "required": ["k", "tag"] }
+      ]
+    },
+    "Prop": {
+      "type": "object",
+      "required": ["n", "vis", "val"],
+      "properties": {
+        "n": { "type": "string" },
+        "vis": { "enum": ["pub", "prot", "priv", "dyn", "meta", "getter"] },
+        "decl": { "type": "string", "description": "Declaring class for private props" },
+        "val": { "$ref": "#/$defs/Value" }
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+// vendor/bin/gaze clean [--dry-run] [path ...]
+$autoload = $GLOBALS['_composer_autoload_path'] ?? null;
+foreach ([$autoload, __DIR__ . '/../../../autoload.php', __DIR__ . '/../vendor/autoload.php'] as $file) {
+    if (is_string($file) && is_file($file)) {
+        require $file;
+        break;
+    }
+}
+if (!class_exists(\TheWonderJoy\Gaze\Console\CleanCommand::class)) {
+    require __DIR__ . '/../src/Console/CleanCommand.php';
+}
+
+exit(\TheWonderJoy\Gaze\Console\CleanCommand::main($argv));

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/protocol/v1/hello.schema.json",
+  "title": "Hello",
+  "description": "Response of GET /v1/hello (capability handshake, DRAFT). 200 means the app is up; clients cache the result (PHP: temp file shared by all workers, 30-60 s).",
+  "type": "object",
+  "required": ["v", "server", "protocol", "features", "limits"],
+  "properties": {
+    "v": { "const": 1 },
+    "server": { "type": "object", "required": ["name", "version"], "properties": { "name": { "type": "string" }, "version": { "type": "string" }, "instance": { "type": "string", "description": "Random per app start; a change tells clients the app restarted (drop cached locks)" } } },
+    "protocol": { "type": "object", "required": ["min", "max"], "properties": { "min": { "type": "integer" }, "max": { "type": "integer" } } },
+    "features": { "type": "array", "items": { "type": "string" }, "description": "e.g. batch, locks.wait, values.v1, ops.append, gzip, zstd, watchers.remote" },
+    "limits": { "type": "object", "properties": { "max_body_bytes": { "type": "integer" }, "max_entries": { "type": "integer" }, "max_value_nodes": { "type": "integer" }, "max_string_chars": { "type": "integer" } } },
+    "watchers": { "type": "object", "description": "Remote-controlled watcher switches (note 02 §15.2). Keys are client-defined watcher names.", "additionalProperties": { "type": "boolean" } },
+    "redact": { "type": "array", "items": { "type": "string" }, "description": "Extra key patterns the client must mask before sending" },
+    "paused": { "type": "boolean", "description": "App-side ingest pause; clients may skip expensive capture while true" }
+  },
+  "additionalProperties": true
+}
