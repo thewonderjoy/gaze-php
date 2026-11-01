@@ -49,12 +49,28 @@ final class SupportTest extends TestCase
 
     public function testCandidates(): void
     {
-        $candidates = HostResolver::candidates(__DIR__ . '/missing-dockerenv', __DIR__ . '/missing-route');
-        $this->assertSame(HostResolver::DEFAULT_HOST, $candidates[0]);
         $this->assertSame('127.0.0.1', HostResolver::DEFAULT_HOST);
-        if (DIRECTORY_SEPARATOR === '\\') {
-            $this->assertSame(['127.0.0.1'], $candidates, 'native Windows probes nothing');
-        }
+        $this->assertSame(HostResolver::DEFAULT_HOST, HostResolver::candidates()[0]);
+        $root = self::root() . DIRECTORY_SEPARATOR . 'fs-' . bin2hex(random_bytes(4));
+        $put = static function (string $path, string $text) use ($root): void {
+            @mkdir(dirname($root . $path), 0777, true);
+            file_put_contents($root . $path, $text);
+        };
+        $put('/proc/net/route', "Iface\tDestination\tGateway \tFlags\neth0\t00000000\t01F01EAC\t0003\n");
+        $put('/proc/version', 'Linux version 6.8.0-49-generic (buildd@lcy02-amd64-103)');
+
+        $this->assertSame(['127.0.0.1'], HostResolver::candidates($root, true), 'native Windows probes nothing');
+        $this->assertSame(['127.0.0.1'], HostResolver::candidates($root, false), 'on plain Linux the gateway is a router');
+
+        $put('/run/.containerenv', '');
+        $this->assertSame(['127.0.0.1', '172.30.240.1'], HostResolver::candidates($root, false), 'Podman: the gateway is the host');
+        unlink($root . '/run/.containerenv');
+
+        $put('/proc/version', 'Linux version 5.15.167.4-microsoft-standard-WSL2 (root@f9c826d3017f)');
+        $this->assertSame(['127.0.0.1', '172.30.240.1'], HostResolver::candidates($root, false), 'WSL2: the gateway is Windows');
+
+        $put('/.dockerenv', '');
+        $this->assertSame(['127.0.0.1', 'host.docker.internal', '172.30.240.1'], HostResolver::candidates($root, false));
     }
 
     public function testLoopbackAndBaseUrl(): void

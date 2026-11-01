@@ -4,12 +4,13 @@
     "type": "library",
     "license": "MIT",
     "keywords": ["debug", "dump", "ray", "gaze", "var-dumper"],
+    "homepage": "https://thewonderjoy.com/products/gaze",
     "authors": [
         { "name": "thewonderjoy" }
     ],
     "support": {
-        "issues": "https://github.com/thewonderjoy/gaze/issues",
-        "source": "https://github.com/thewonderjoy/gaze/tree/main/packages/php"
+        "issues": "https://github.com/thewonderjoy/gaze-php/issues",
+        "source": "https://github.com/thewonderjoy/gaze-php"
     },
     "require": {
         "php": "^8.2",

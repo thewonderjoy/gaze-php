@@ -11,8 +11,9 @@ use TheWonderJoy\Gaze\Support\StateFile;
  * Picks the host when none is configured (GAZE_HOST, RAY_HOST or Gaze::configure()).
  *
  * Candidates in order: 127.0.0.1 (localhost), host.docker.internal (when /.dockerenv exists or
- * LARAVEL_SAIL is set), then the default gateway from /proc/net/route (WSL2 NAT and
- * containers reach the Windows host through it). With more than one candidate they are
+ * LARAVEL_SAIL is set), then, only under WSL or in a container, the default gateway from
+ * /proc/net/route (WSL2 NAT and containers reach the host through it; on other Linux machines
+ * it is a router). With more than one candidate they are
  * probed in parallel (GET /v1/hello, 150 ms connect timeout) and the winner is cached in
  * a temp file for 60 s, so FPM workers do not probe on every request.
  *
@@ -59,17 +60,27 @@ final class HostResolver
         return $winner ?? $candidates[0];
     }
 
-    /** @return list<string> */
-    public static function candidates(string $dockerEnvFile = '/.dockerenv', string $routeFile = '/proc/net/route'): array
+    /**
+     * `$root` and `$windows` stand in for the file system root and the OS in tests.
+     *
+     * @return list<string>
+     */
+    public static function candidates(string $root = '', ?bool $windows = null): array
     {
         $candidates = [self::DEFAULT_HOST];
-        if (DIRECTORY_SEPARATOR === '\\') {
+        if ($windows ?? DIRECTORY_SEPARATOR === '\\') {
             return $candidates; // native Windows: the app is on this machine
         }
-        if (@file_exists($dockerEnvFile) || Config::env('LARAVEL_SAIL') !== null) {
+        $docker = @file_exists($root . '/.dockerenv') || Config::env('LARAVEL_SAIL') !== null;
+        if ($docker) {
             $candidates[] = 'host.docker.internal';
         }
-        if (@is_readable($routeFile)) {
+        // The gateway is the Windows host under WSL2 and the host machine in a container. Anywhere
+        // else it is a router, and whoever answers on it would get every dump and the token.
+        $container = $docker || @file_exists($root . '/run/.containerenv');
+        $wsl = stripos((string) @file_get_contents($root . '/proc/version'), 'microsoft') !== false;
+        $routeFile = $root . '/proc/net/route';
+        if (($container || $wsl) && @is_readable($routeFile)) {
             $gateway = self::gateway((string) @file_get_contents($routeFile));
             if ($gateway !== null) {
                 $candidates[] = $gateway;
