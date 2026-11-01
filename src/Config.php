@@ -150,10 +150,7 @@ final class Config
 
         // Off by default when APP_ENV says production (Laravel "production", Symfony "prod"), so a
         // regular (non --dev) install keeps leftover gaze() calls silent on a live server.
-        $o['enabled'] = self::bool(
-            array_key_exists('enabled', self::$overrides) ? self::$overrides['enabled'] : self::env('GAZE_ENABLED'),
-            !self::isProduction(),
-        );
+        $o['enabled'] = self::bool(self::$overrides['enabled'] ?? self::env('GAZE_ENABLED'), !self::isProduction());
         $o['host'] = self::$overrides['host'] ?? self::env('GAZE_HOST') ?? self::env('RAY_HOST');
         $port = self::$overrides['port'] ?? self::env('GAZE_PORT') ?? self::env('RAY_PORT');
         $o['port'] = is_numeric($port) && (int) $port > 0 && (int) $port < 65536 ? (int) $port : self::DEFAULT_PORT;
