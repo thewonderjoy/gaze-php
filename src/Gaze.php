@@ -26,7 +26,7 @@ class Gaze
 {
     use Macroable;
 
-    public const VERSION = '1.0.2';
+    public const VERSION = '1.0.3';
 
     public const COLORS = ['green', 'orange', 'red', 'purple', 'blue', 'gray'];
 
